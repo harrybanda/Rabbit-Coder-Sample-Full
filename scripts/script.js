@@ -1,3 +1,4 @@
+// Spark AR Modules
 const Scene = require("Scene");
 const Audio = require("Audio");
 const TouchGestures = require("TouchGestures");
@@ -8,11 +9,13 @@ const Animation = require("Animation");
 const Reactive = require("Reactive");
 
 Promise.all([
+  // Game Objects
   Scene.root.findFirst("bunny"),
   Scene.root.findFirst("carrot"),
   Scene.root.findFirst("blocks"),
   Scene.root.findFirst("platforms"),
   Scene.root.findFirst("buttons"),
+  // Game Audio
   Audio.getAudioPlaybackController("jump"),
   Audio.getAudioPlaybackController("drop"),
   Audio.getAudioPlaybackController("fail"),
@@ -29,7 +32,7 @@ Promise.all([
   const platforms = results[3];
   const buttons = results[4];
 
-  // Game sounds
+  // Game Audio
   const jumpSound = results[5];
   const dropSound = results[6];
   const failSound = results[7];
@@ -38,8 +41,8 @@ Promise.all([
   const removeSound = results[10];
   const waterEmitter = results[11];
 
+  // Game variables and constants
   const levels = require("./levels");
-
   let currentLevel = 0;
   const gridSize = 0.36;
   const gridInc = 0.12;
@@ -54,6 +57,7 @@ Promise.all([
     complete: 3,
     failed: 4,
   };
+
   let commands = [];
   let blocksUsed = 0;
   let currentState = states.start;
@@ -192,6 +196,21 @@ Promise.all([
     return coords;
   }
 
+  function createDangerCoordinates() {
+    // Get the danger coordinates by removing the current path coordinates
+    let coords = allCoordinates;
+    for (let i = 0; i < pathCoordinates.length; i++) {
+      for (let j = 0; j < coords.length; j++) {
+        let lvlCoordStr = JSON.stringify(pathCoordinates[i]);
+        let genCoordStr = JSON.stringify(coords[j]);
+        if (lvlCoordStr === genCoordStr) {
+          coords.splice(j, 1);
+        }
+      }
+    }
+    return coords;
+  }
+
   function addCommand(move) {
     if (currentState === states.start) {
       if (blocksUsed < numOfBlocks) {
@@ -238,6 +257,8 @@ Promise.all([
       }
     }, delay);
   }
+
+  /*------------- Rabbit Movement Animation -------------*/
 
   function animatePlayerMovement(command) {
     const timeDriverParameters = {
@@ -350,6 +371,33 @@ Promise.all([
     }
   }
 
+  /*------------- Player Idle Animation -------------*/
+
+  function animatePlayerIdle() {
+    const timeDriverParameters = {
+      durationMilliseconds: 400,
+      loopCount: Infinity,
+      mirror: true,
+    };
+    const timeDriver = Animation.timeDriver(timeDriverParameters);
+
+    const scale = Animation.animate(
+      timeDriver,
+      Animation.samplers.linear(
+        player.transform.scaleY.pinLastValue(),
+        player.transform.scaleY.pinLastValue() + 0.02
+      )
+    );
+
+    player.transform.scaleY = scale;
+
+    timeDriver.start();
+  }
+
+  animatePlayerIdle();
+
+  /*------------- Level Complete Animation -------------*/
+
   function animateLevelComplete() {
     const timeDriverParameters = {
       durationMilliseconds: 450,
@@ -375,6 +423,8 @@ Promise.all([
     timeDriver.start();
   }
 
+  /*------------- Player Fall Animation -------------*/
+
   function animatePlayerFall() {
     emmitWaterParticles();
     const timeDriverParameters = {
@@ -398,6 +448,8 @@ Promise.all([
       player.hidden = true;
     }, 200);
   }
+
+  /*------------- Carrot Spin Animation -------------*/
 
   function animateCarrot() {
     const timeDriverParameters = {
@@ -423,6 +475,8 @@ Promise.all([
 
   animateCarrot();
 
+  /*------------- Water Splash Animation -------------*/
+
   function emmitWaterParticles() {
     const sizeSampler = Animation.samplers.easeInQuad(0.015, 0.007);
     waterEmitter.transform.x = player.transform.x;
@@ -434,21 +488,6 @@ Promise.all([
       player.hidden = true;
       waterEmitter.birthrate = 0;
     }, 200);
-  }
-
-  function createDangerCoordinates() {
-    // Get the danger coordinates by removing the current path coordinates
-    let coords = allCoordinates;
-    for (let i = 0; i < pathCoordinates.length; i++) {
-      for (let j = 0; j < coords.length; j++) {
-        let lvlCoordStr = JSON.stringify(pathCoordinates[i]);
-        let genCoordStr = JSON.stringify(coords[j]);
-        if (lvlCoordStr === genCoordStr) {
-          coords.splice(j, 1);
-        }
-      }
-    }
-    return coords;
   }
 
   /*------------- Initialize current level -------------*/
