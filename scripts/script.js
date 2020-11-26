@@ -8,49 +8,55 @@ const Textures = require("Textures");
 const Animation = require("Animation");
 const Reactive = require("Reactive");
 
-Promise.all([
-  // Game Objects
-  Scene.root.findFirst("bunny"),
-  Scene.root.findFirst("carrot"),
-  Scene.root.findFirst("blocks"),
-  Scene.root.findFirst("platforms"),
-  Scene.root.findFirst("buttons"),
-  // Game Audio
-  Audio.getAudioPlaybackController("jump"),
-  Audio.getAudioPlaybackController("drop"),
-  Audio.getAudioPlaybackController("fail"),
-  Audio.getAudioPlaybackController("complete"),
-  Audio.getAudioPlaybackController("click"),
-  Audio.getAudioPlaybackController("remove"),
-  // water emmiter
-  Scene.root.findFirst("water_emitter"),
-]).then(function (results) {
-  // Game objects
-  const player = results[0];
-  const carrot = results[1];
-  const blocks = results[2];
-  const platforms = results[3];
-  const buttons = results[4];
+(async function () {
+  const [
+    // Game Objects
+    bunny,
+    carrot,
+    blocks,
+    platforms,
+    buttons,
+    waterEmitter,
+    buttonMats,
+    blockMats,
+    buttonTextures,
+    // Game Audio
+    jumpSound,
+    dropSound,
+    failSound,
+    completeSound,
+    clickSound,
+    removeSound,
+  ] = await Promise.all([
+    // Game Objects
+    Scene.root.findFirst("bunny"),
+    Scene.root.findFirst("carrot"),
+    Scene.root.findByPath("**/blocks/*"),
+    Scene.root.findByPath("**/platforms/*"),
+    Scene.root.findByPath("**/buttons/*"),
+    Scene.root.findFirst("water_emitter"),
+    Materials.findUsingPattern("btn*"),
+    Materials.findUsingPattern("*block_mat"),
+    Textures.findUsingPattern("btn*"),
+    // Game Audio
+    Audio.getAudioPlaybackController("jump"),
+    Audio.getAudioPlaybackController("drop"),
+    Audio.getAudioPlaybackController("fail"),
+    Audio.getAudioPlaybackController("complete"),
+    Audio.getAudioPlaybackController("click"),
+    Audio.getAudioPlaybackController("remove"),
+  ]);
 
-  // Game Audio
-  const jumpSound = results[5];
-  const dropSound = results[6];
-  const failSound = results[7];
-  const completeSound = results[8];
-  const clickSound = results[9];
-  const removeSound = results[10];
-  const waterEmitter = results[11];
-
-  // Game variables and constants
+  // Game constants
   const levels = require("./levels");
-  let currentLevel = 0;
   const gridSize = 0.36;
   const gridInc = 0.12;
-  let playerDir = levels[currentLevel].facing;
-  let platformsUsed = 0;
   const numOfPlatforms = 10;
   const playerInitY = 0.02;
-
+  const blockSlotInc = 0.1;
+  const initBlockSlot = 0.6;
+  const numOfBlocks = 10;
+  const blockInitY = 0.9;
   const states = {
     start: 1,
     running: 2,
@@ -58,24 +64,21 @@ Promise.all([
     failed: 4,
   };
 
+  // Game variables
+  let currentLevel = 0;
+  let playerDir = levels[currentLevel].facing;
   let commands = [];
   let blocksUsed = 0;
   let currentState = states.start;
-  const blockSlotInc = 0.1;
-  const initBlockSlot = 0.6;
-  const numOfBlocks = 10;
-  const blockInitY = 0.9;
   let nextBlockSlot = initBlockSlot;
   let exeIntervalID;
-
   let allCoordinates = createAllCoordinates();
   let pathCoordinates = createPathCoordinates();
   let dangerCoordinates = createDangerCoordinates();
 
   /*------------- Button Taps -------------*/
 
-  for (let i = 0; i < 4; i++) {
-    let button = buttons.child("btn" + i);
+  buttons.forEach((button, i) => {
     TouchGestures.onTap(button).subscribe(function () {
       switch (i) {
         case 0:
@@ -107,27 +110,26 @@ Promise.all([
               break;
           }
           break;
+        case 4:
+          removeSound.setPlaying(true);
+          removeSound.reset();
+          if (blocksUsed !== 0 && currentState === states.start) {
+            let popped = commands.pop();
+            popped.block.transform.y = blockInitY;
+            popped.block.hidden = true;
+            nextBlockSlot += blockSlotInc;
+            blocksUsed--;
+          }
+          break;
       }
     });
-  }
-
-  TouchGestures.onTap(blocks.child("btn4")).subscribe(function () {
-    removeSound.setPlaying(true);
-    removeSound.reset();
-    if (blocksUsed !== 0 && currentState === states.start) {
-      let popped = commands.pop();
-      popped.block.transform.y = blockInitY;
-      popped.block.hidden = true;
-      nextBlockSlot += blockSlotInc;
-      blocksUsed--;
-    }
   });
 
   /*------------- Monitor Player Position -------------*/
 
   Reactive.monitorMany({
-    x: player.transform.x,
-    z: player.transform.z,
+    x: bunny.transform.x,
+    z: bunny.transform.z,
   }).subscribe(({ newValues }) => {
     let playerX = newValues.x;
     let playerZ = newValues.z;
@@ -140,11 +142,11 @@ Promise.all([
       isBetween(playerX, goalX + collisionArea, goalX - collisionArea) &&
       isBetween(playerZ, goalZ + collisionArea, goalZ - collisionArea)
     ) {
-      player.transform.x = goalX;
-      player.transform.z = goalZ;
+      bunny.transform.x = goalX;
+      bunny.transform.z = goalZ;
       commands = [];
       Time.clearInterval(exeIntervalID);
-      changeState(states.complete, "next");
+      changeState(states.complete, "btn_next");
       carrot.hidden = true;
       animateLevelComplete();
       completeSound.setPlaying(true);
@@ -159,11 +161,11 @@ Promise.all([
         isBetween(playerX, dx + collisionArea, dx - collisionArea) &&
         isBetween(playerZ, dz + collisionArea, dz - collisionArea)
       ) {
-        player.transform.x = dx;
-        player.transform.z = dz;
+        bunny.transform.x = dx;
+        bunny.transform.z = dz;
         commands = [];
         Time.clearInterval(exeIntervalID);
-        changeState(states.failed, "retry");
+        changeState(states.failed, "btn_retry");
         animatePlayerFall();
         dropSound.setPlaying(true);
         dropSound.reset();
@@ -214,10 +216,18 @@ Promise.all([
   function addCommand(move) {
     if (currentState === states.start) {
       if (blocksUsed < numOfBlocks) {
-        let block = blocks.child("block" + blocksUsed++);
+        let block = blocks[blocksUsed];
+        blocksUsed++;
         nextBlockSlot -= blockSlotInc;
         block.transform.y = nextBlockSlot;
-        block.material = Materials.get(move + "_block_mat");
+
+        // Set the block material
+        for (let i = 0; i < blockMats.length; i++) {
+          if (blockMats[i].name === move + "_block_mat") {
+            block.material = blockMats[i];
+          }
+        }
+
         block.hidden = false;
         commands.push({ command: move, block: block });
         clickSound.setPlaying(true);
@@ -251,7 +261,7 @@ Promise.all([
       if (++e === repetitions) {
         Time.clearInterval(exeIntervalID);
         if (currentState === states.running) currentState = states.uncomplete;
-        setTexture(buttons.child("btn3"), "retry");
+        setTexture("btn_retry");
         failSound.setPlaying(true);
         failSound.reset();
       }
@@ -271,48 +281,48 @@ Promise.all([
     const translationNegX = Animation.animate(
       timeDriver,
       Animation.samplers.linear(
-        player.transform.x.pinLastValue(),
-        player.transform.x.pinLastValue() - gridInc
+        bunny.transform.x.pinLastValue(),
+        bunny.transform.x.pinLastValue() - gridInc
       )
     );
 
     const translationPosX = Animation.animate(
       timeDriver,
       Animation.samplers.linear(
-        player.transform.x.pinLastValue(),
-        player.transform.x.pinLastValue() + gridInc
+        bunny.transform.x.pinLastValue(),
+        bunny.transform.x.pinLastValue() + gridInc
       )
     );
 
     const translationNegZ = Animation.animate(
       timeDriver,
       Animation.samplers.linear(
-        player.transform.z.pinLastValue(),
-        player.transform.z.pinLastValue() - gridInc
+        bunny.transform.z.pinLastValue(),
+        bunny.transform.z.pinLastValue() - gridInc
       )
     );
 
     const translationPosZ = Animation.animate(
       timeDriver,
       Animation.samplers.linear(
-        player.transform.z.pinLastValue(),
-        player.transform.z.pinLastValue() + gridInc
+        bunny.transform.z.pinLastValue(),
+        bunny.transform.z.pinLastValue() + gridInc
       )
     );
 
     const rotationLeft = Animation.animate(
       timeDriver,
       Animation.samplers.linear(
-        player.transform.rotationY.pinLastValue(),
-        player.transform.rotationY.pinLastValue() + degreesToRadians(90)
+        bunny.transform.rotationY.pinLastValue(),
+        bunny.transform.rotationY.pinLastValue() + degreesToRadians(90)
       )
     );
 
     const rotationRight = Animation.animate(
       timeDriver,
       Animation.samplers.linear(
-        player.transform.rotationY.pinLastValue(),
-        player.transform.rotationY.pinLastValue() - degreesToRadians(90)
+        bunny.transform.rotationY.pinLastValue(),
+        bunny.transform.rotationY.pinLastValue() - degreesToRadians(90)
       )
     );
 
@@ -331,17 +341,17 @@ Promise.all([
 
     switch (command) {
       case "forward":
-        player.transform.y = jump;
+        bunny.transform.y = jump;
         jumpSound.setPlaying(true);
         jumpSound.reset();
         if (playerDir === "east") {
-          player.transform.x = translationPosX;
+          bunny.transform.x = translationPosX;
         } else if (playerDir === "north") {
-          player.transform.z = translationNegZ;
+          bunny.transform.z = translationNegZ;
         } else if (playerDir === "west") {
-          player.transform.x = translationNegX;
+          bunny.transform.x = translationNegX;
         } else if (playerDir === "south") {
-          player.transform.z = translationPosZ;
+          bunny.transform.z = translationPosZ;
         }
         break;
       case "left":
@@ -354,7 +364,7 @@ Promise.all([
         } else if (playerDir === "south") {
           playerDir = "east";
         }
-        player.transform.rotationY = rotationLeft;
+        bunny.transform.rotationY = rotationLeft;
         break;
       case "right":
         if (playerDir === "east") {
@@ -366,7 +376,7 @@ Promise.all([
         } else if (playerDir === "north") {
           playerDir = "east";
         }
-        player.transform.rotationY = rotationRight;
+        bunny.transform.rotationY = rotationRight;
         break;
     }
   }
@@ -384,12 +394,12 @@ Promise.all([
     const scale = Animation.animate(
       timeDriver,
       Animation.samplers.linear(
-        player.transform.scaleY.pinLastValue(),
-        player.transform.scaleY.pinLastValue() + 0.02
+        bunny.transform.scaleY.pinLastValue(),
+        bunny.transform.scaleY.pinLastValue() + 0.02
       )
     );
 
-    player.transform.scaleY = scale;
+    bunny.transform.scaleY = scale;
 
     timeDriver.start();
   }
@@ -418,7 +428,7 @@ Promise.all([
       })
     );
 
-    player.transform.y = jump;
+    bunny.transform.y = jump;
 
     timeDriver.start();
   }
@@ -440,12 +450,12 @@ Promise.all([
       Animation.samplers.easeInOutSine(playerInitY - 0.1, -0.17)
     );
 
-    player.transform.y = moveY;
+    bunny.transform.y = moveY;
 
     timeDriver.start();
 
     Time.setTimeout(function () {
-      player.hidden = true;
+      bunny.hidden = true;
     }, 200);
   }
 
@@ -479,13 +489,13 @@ Promise.all([
 
   function emmitWaterParticles() {
     const sizeSampler = Animation.samplers.easeInQuad(0.015, 0.007);
-    waterEmitter.transform.x = player.transform.x;
-    waterEmitter.transform.z = player.transform.z;
+    waterEmitter.transform.x = bunny.transform.x;
+    waterEmitter.transform.z = bunny.transform.z;
     waterEmitter.birthrate = 500;
     waterEmitter.sizeModifier = sizeSampler;
 
     Time.setTimeout(function () {
-      player.hidden = true;
+      bunny.hidden = true;
       waterEmitter.birthrate = 0;
     }, 200);
   }
@@ -496,9 +506,9 @@ Promise.all([
     playerDir = levels[currentLevel].facing;
 
     // Set the player's initial position
-    player.transform.x = pathCoordinates[0][0];
-    player.transform.z = pathCoordinates[0][1];
-    player.transform.y = playerInitY;
+    bunny.transform.x = pathCoordinates[0][0];
+    bunny.transform.z = pathCoordinates[0][1];
+    bunny.transform.y = playerInitY;
 
     // set carrot position
     let goalX = pathCoordinates[pathCoordinates.length - 1][0];
@@ -510,13 +520,13 @@ Promise.all([
 
     // Set the player's initial direction
     if (playerDir === "east") {
-      player.transform.rotationY = 0;
+      bunny.transform.rotationY = 0;
     } else if (playerDir === "north") {
-      player.transform.rotationY = degreesToRadians(90);
+      bunny.transform.rotationY = degreesToRadians(90);
     } else if (playerDir === "west") {
-      player.transform.rotationY = degreesToRadians(180);
+      bunny.transform.rotationY = degreesToRadians(180);
     } else if (playerDir === "south") {
-      player.transform.rotationY = degreesToRadians(270);
+      bunny.transform.rotationY = degreesToRadians(270);
     }
 
     // Add the path platforms
@@ -524,7 +534,7 @@ Promise.all([
       let path = pathCoordinates[i];
       let x = path[0];
       let z = path[1];
-      let platform = platforms.child("platform" + platformsUsed++);
+      let platform = platforms[i];
       platform.transform.x = x;
       platform.transform.z = z;
       platform.hidden = false;
@@ -540,16 +550,15 @@ Promise.all([
     playerDir = levels[currentLevel].facing;
     commands = [];
     blocksUsed = 0;
-    platformsUsed = 0;
     nextBlockSlot = initBlockSlot;
 
-    player.hidden = false;
+    bunny.hidden = false;
 
-    setTexture(buttons.child("btn3"), "play");
+    setTexture("btn_play");
     Time.clearInterval(exeIntervalID);
 
     for (let i = 0; i < numOfBlocks; i++) {
-      let block = blocks.child("block" + i);
+      let block = blocks[i];
       block.transform.y = blockInitY;
       block.hidden = true;
     }
@@ -560,7 +569,7 @@ Promise.all([
   /*------------- Go to next level -------------*/
 
   function nextLevel(state) {
-    if (state === "next") {
+    if (state === "next" && currentLevel < levels.length - 1) {
       currentLevel++;
     } else {
       currentLevel = 0;
@@ -571,7 +580,7 @@ Promise.all([
     dangerCoordinates = createDangerCoordinates();
 
     for (let i = 0; i < numOfPlatforms; i++) {
-      let platform = platforms.child("platform" + i);
+      let platform = platforms[i];
       platform.hidden = true;
     }
 
@@ -585,9 +594,13 @@ Promise.all([
     return degrees * (pi / 180);
   }
 
-  function setTexture(object, texture) {
-    let signal = Textures.get(texture).signal;
-    object.material.setTextureSlot("DIFFUSE", signal);
+  function setTexture(texture_name) {
+    for (let i = 0; i < buttonTextures.length; i++) {
+      if (buttonTextures[i].name === texture_name) {
+        let signal = buttonTextures[i].signal;
+        buttonMats[3].setTextureSlot("DIFFUSE", signal);
+      }
+    }
   }
 
   function isBetween(n, a, b) {
@@ -597,7 +610,7 @@ Promise.all([
   function changeState(state, buttonText) {
     Time.setTimeout(function () {
       currentState = state;
-      setTexture(buttons.child("btn3"), buttonText);
+      setTexture(buttonText);
     }, 500);
   }
-});
+})();
